@@ -9,6 +9,7 @@ import (
 
 type reader interface {
 	Read() ([]models.Pokemon, error)
+	ReadByLine() <-chan models.Pokemon
 }
 
 type saver interface {
@@ -27,6 +28,41 @@ type Refresher struct {
 
 func NewRefresher(reader reader, saver saver, fetcher fetcher) Refresher {
 	return Refresher{reader, saver, fetcher}
+}
+
+func (r Refresher) RefreshV2(ctx context.Context) <-chan error {
+	errChan := make(chan error)
+	var pokemons []models.Pokemon
+	go func() {
+		defer close(errChan)
+		pokeChan := r.ReadByLine()
+		for p := range pokeChan {
+			urls := strings.Split(p.FlatAbilityURLs, "|")
+			var abilities []string
+			for _, url := range urls {
+				ability, err := r.FetchAbility(url)
+				if err != nil {
+					errChan <- err
+					return
+				}
+
+				for _, ee := range ability.EffectEntries {
+					abilities = append(abilities, ee.Effect)
+				}
+			}
+
+			p.EffectEntries = abilities
+			pokemons = append(pokemons, p)
+
+		}
+		if err := r.Save(ctx, pokemons); err != nil {
+			errChan <- err
+			return
+		}
+
+	}()
+
+	return errChan
 }
 
 func (r Refresher) Refresh(ctx context.Context) error {

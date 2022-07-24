@@ -28,6 +28,7 @@ type fetcher interface {
 
 type refresher interface {
 	Refresh(context.Context) error
+	RefreshV2(context.Context) <-chan error
 }
 
 type getter interface {
@@ -61,9 +62,13 @@ func (api API) FillCSV(c *gin.Context) {
 
 //RefreshCache feeds the csv data and save in redis
 func (api API) RefreshCache(c *gin.Context) {
-	if err := api.Refresh(c); err != nil {
-		c.Status(http.StatusInternalServerError)
-		return
+	errChan := api.RefreshV2(c)
+	for err := range errChan {
+		if err != nil {
+			c.Status(http.StatusInternalServerError)
+			fmt.Println("err: ", err)
+			return
+		}
 	}
 
 	c.Status(http.StatusOK)

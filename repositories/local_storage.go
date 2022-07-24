@@ -3,9 +3,12 @@ package repositories
 import (
 	"encoding/csv"
 	"fmt"
+	"io"
+	"log"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"GoConcurrency-Bootcamp-2022/models"
 )
@@ -28,6 +31,45 @@ func (l LocalStorage) Write(pokemons []models.Pokemon) error {
 	}
 
 	return nil
+}
+
+func (l LocalStorage) ReadByLine() <-chan models.Pokemon {
+	pokChan := make(chan models.Pokemon, 8)
+	go func() {
+		defer close(pokChan)
+		file, ferr := os.Open(filePath)
+		if ferr != nil {
+			log.Fatal(ferr)
+		}
+		defer file.Close()
+
+		csvReader := csv.NewReader(file)
+		line := 0
+		for {
+			start := time.Now()
+			record, err := csvReader.Read()
+			after := time.Since(start)
+			fmt.Printf("csvReader.Read takes: %v", after)
+			if line == 0 {
+				line++
+				continue
+			}
+			if err == io.EOF {
+				return
+			}
+			if err != nil {
+				return
+			}
+			pokemon, err := parseCSVRecord(record)
+			if err != nil {
+				return
+			}
+			// here we save the batch to proccess
+			pokChan <- *pokemon
+		}
+
+	}()
+	return pokChan
 }
 
 func (l LocalStorage) Read() ([]models.Pokemon, error) {
@@ -65,6 +107,37 @@ func buildRecords(pokemons []models.Pokemon) [][]string {
 	}
 
 	return records
+}
+
+func parseCSVRecord(record []string) (*models.Pokemon, error) {
+	var pokemon models.Pokemon
+
+	id, err := strconv.Atoi(record[0])
+	if err != nil {
+		return nil, err
+	}
+
+	height, err := strconv.Atoi(record[2])
+	if err != nil {
+		return nil, err
+	}
+
+	weight, err := strconv.Atoi(record[3])
+	if err != nil {
+		return nil, err
+	}
+
+	pokemon = models.Pokemon{
+		ID:              id,
+		Name:            record[1],
+		Height:          height,
+		Weight:          weight,
+		Abilities:       nil,
+		FlatAbilityURLs: record[4],
+		EffectEntries:   nil,
+	}
+
+	return &pokemon, nil
 }
 
 func parseCSVData(records [][]string) ([]models.Pokemon, error) {
