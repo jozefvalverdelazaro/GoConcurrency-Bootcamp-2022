@@ -38,20 +38,7 @@ func (r Refresher) RefreshV2(ctx context.Context) <-chan error {
 		pokeChan := r.ReadByLine()
 		for p := range pokeChan {
 			urls := strings.Split(p.FlatAbilityURLs, "|")
-			var abilities []string
-			for _, url := range urls {
-				ability, err := r.FetchAbility(url)
-				if err != nil {
-					errChan <- err
-					return
-				}
-
-				for _, ee := range ability.EffectEntries {
-					abilities = append(abilities, ee.Effect)
-				}
-			}
-
-			p.EffectEntries = abilities
+			p.EffectEntries = r.FanOutFetchAbilities(urls)
 			pokemons = append(pokemons, p)
 
 		}
@@ -63,6 +50,36 @@ func (r Refresher) RefreshV2(ctx context.Context) <-chan error {
 	}()
 
 	return errChan
+}
+
+func (r Refresher) FanOutFetchAbilities(urls []string) []string {
+	availableWorkers := len(urls)
+	resChan := make(chan models.Ability, availableWorkers)
+
+	var abilities []string
+
+	runningStateWorkers := 3
+	runningStateWorkersChan := make(chan int, runningStateWorkers)
+
+	for i := 0; i < availableWorkers; i++ {
+		go func(index int) {
+			runningStateWorkersChan <- index
+			{
+				ability, _ := r.FetchAbility(urls[index])
+				resChan <- ability
+			}
+			<-runningStateWorkersChan
+		}(i)
+	}
+
+	for availableWorkers > 0 {
+		ability := <-resChan
+		for _, ee := range ability.EffectEntries {
+			abilities = append(abilities, ee.Effect)
+		}
+		availableWorkers--
+	}
+	return abilities
 }
 
 func (r Refresher) Refresh(ctx context.Context) error {

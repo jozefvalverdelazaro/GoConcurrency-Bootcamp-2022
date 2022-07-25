@@ -8,7 +8,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"time"
 
 	"GoConcurrency-Bootcamp-2022/models"
 )
@@ -46,10 +45,7 @@ func (l LocalStorage) ReadByLine() <-chan models.Pokemon {
 		csvReader := csv.NewReader(file)
 		line := 0
 		for {
-			start := time.Now()
 			record, err := csvReader.Read()
-			after := time.Since(start)
-			fmt.Printf("csvReader.Read takes: %v", after)
 			if line == 0 {
 				line++
 				continue
