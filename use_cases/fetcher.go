@@ -8,7 +8,7 @@ import (
 )
 
 type api interface {
-	FetchPokemon(id int, wg *sync.WaitGroup) (models.Pokemon, error)
+	FetchPokemon(id int) (models.Pokemon, error)
 }
 
 type writer interface {
@@ -30,42 +30,60 @@ type FetchResponse struct {
 	Pokemon models.Pokemon
 }
 
-func (f Fetcher) Fetch(from, to int) chan FetchResponse {
-	fetchResChan := make(chan FetchResponse)
-	nPokemons := to - from + 1
-	f.wg.Add(nPokemons)
-	for id := from; id <= to; id++ {
-		go func(id int) {
-			pokemon, err := f.api.FetchPokemon(id, &f.wg)
-			if err != nil {
-				fetchResChan <- FetchResponse{Err: err}
-			} else {
-				var flatAbilities []string
-				for _, t := range pokemon.Abilities {
-					flatAbilities = append(flatAbilities, t.Ability.URL)
+func (f Fetcher) FetchV2(from, to int, doneChan chan bool) <-chan models.Pokemon {
+	availableWorkers := to - from + 1
+	resChan := make(chan models.Pokemon, availableWorkers)
+
+	pokChan := make(chan models.Pokemon, availableWorkers)
+
+	runningStateWorkers := 100
+	runningStateWorkersChan := make(chan int, runningStateWorkers)
+
+	for id := from; id <= availableWorkers; id++ {
+		go func(index int) {
+			runningStateWorkersChan <- index
+			{
+				pokemon, err := f.api.FetchPokemon(index)
+				if err != nil {
+					doneChan <- true
+					close(resChan)
+					return
 				}
-				pokemon.FlatAbilityURLs = strings.Join(flatAbilities, "|")
-				fetchResChan <- FetchResponse{Pokemon: pokemon}
+				resChan <- pokemon
+
 			}
+			<-runningStateWorkersChan
 		}(id)
 	}
 	go func() {
-		f.wg.Wait()
-		close(fetchResChan)
+		defer close(pokChan)
+		for availableWorkers > 0 {
+			pokemon := <-resChan
+			var flatAbilities []string
+			for _, t := range pokemon.Abilities {
+				flatAbilities = append(flatAbilities, t.Ability.URL)
+			}
+			pokemon.FlatAbilityURLs = strings.Join(flatAbilities, "|")
+			pokChan <- pokemon
+			availableWorkers--
+		}
 	}()
-	return fetchResChan
+
+	return pokChan
 }
 
-func (f Fetcher) WriteToCSV(res chan FetchResponse) <-chan error {
+func (f Fetcher) WriteToCSV(res <-chan models.Pokemon, doneChan chan bool) <-chan error {
 	var pokemons []models.Pokemon
 	errChan := make(chan error)
 	go func() {
 		defer close(errChan)
 		for v := range res {
-			if v.Err != nil {
-				errChan <- v.Err
+			select {
+			case <-doneChan:
+				return
+			default:
+				pokemons = append(pokemons, v)
 			}
-			pokemons = append(pokemons, v.Pokemon)
 		}
 		errChan <- f.storage.Write(pokemons)
 	}()

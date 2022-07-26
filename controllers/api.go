@@ -6,7 +6,6 @@ import (
 	"net/http"
 
 	"GoConcurrency-Bootcamp-2022/models"
-	"GoConcurrency-Bootcamp-2022/use_cases"
 
 	"github.com/gin-gonic/gin"
 )
@@ -22,8 +21,8 @@ func NewAPI(fetcher fetcher, refresher refresher, getter getter) API {
 }
 
 type fetcher interface {
-	Fetch(from, to int) chan use_cases.FetchResponse
-	WriteToCSV(res chan use_cases.FetchResponse) <-chan error
+	FetchV2(from, to int, doneChan chan bool) <-chan models.Pokemon
+	WriteToCSV(res <-chan models.Pokemon, doneChan chan bool) <-chan error
 }
 
 type refresher interface {
@@ -48,8 +47,9 @@ func (api API) FillCSV(c *gin.Context) {
 		fmt.Println(err)
 		return
 	}
-	fetchResChan := api.Fetch(requestBody.From, requestBody.To)
-	errChan := api.WriteToCSV(fetchResChan)
+	doneChan := make(chan bool)
+	fetchResChan := api.FetchV2(requestBody.From, requestBody.To, doneChan)
+	errChan := api.WriteToCSV(fetchResChan, doneChan)
 	for err := range errChan {
 		if err != nil {
 			c.Status(http.StatusInternalServerError)
