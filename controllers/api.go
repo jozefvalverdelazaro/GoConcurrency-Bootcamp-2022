@@ -21,11 +21,13 @@ func NewAPI(fetcher fetcher, refresher refresher, getter getter) API {
 }
 
 type fetcher interface {
-	Fetch(from, to int) error
+	FetchV2(from, to int, doneChan chan bool) <-chan models.Pokemon
+	WriteToCSV(res <-chan models.Pokemon, doneChan chan bool) <-chan error
 }
 
 type refresher interface {
 	Refresh(context.Context) error
+	RefreshV2(context.Context) <-chan error
 }
 
 type getter interface {
@@ -45,21 +47,28 @@ func (api API) FillCSV(c *gin.Context) {
 		fmt.Println(err)
 		return
 	}
-
-	if err := api.Fetch(requestBody.From, requestBody.To); err != nil {
-		c.Status(http.StatusInternalServerError)
-		fmt.Println(err)
-		return
+	doneChan := make(chan bool)
+	fetchResChan := api.FetchV2(requestBody.From, requestBody.To, doneChan)
+	errChan := api.WriteToCSV(fetchResChan, doneChan)
+	for err := range errChan {
+		if err != nil {
+			c.Status(http.StatusInternalServerError)
+			fmt.Println("err: ", err)
+			return
+		}
 	}
-
 	c.Status(http.StatusOK)
 }
 
 //RefreshCache feeds the csv data and save in redis
 func (api API) RefreshCache(c *gin.Context) {
-	if err := api.Refresh(c); err != nil {
-		c.Status(http.StatusInternalServerError)
-		return
+	errChan := api.RefreshV2(c)
+	for err := range errChan {
+		if err != nil {
+			c.Status(http.StatusInternalServerError)
+			fmt.Println("err: ", err)
+			return
+		}
 	}
 
 	c.Status(http.StatusOK)

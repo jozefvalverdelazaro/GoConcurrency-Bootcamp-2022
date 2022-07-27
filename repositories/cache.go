@@ -30,8 +30,8 @@ func (c Cache) Save(ctx context.Context, pokemons []models.Pokemon) error {
 	for _, p := range pokemons {
 		hashMap[fmt.Sprintf("%d", p.ID)] = p
 	}
-
-	return c.redis.HSet(ctx, cacheKey, hashMap).Err()
+	err := c.redis.HSet(ctx, cacheKey, hashMap).Err()
+	return err
 }
 
 func (c Cache) GetPokemons(ctx context.Context) ([]models.Pokemon, error) {
